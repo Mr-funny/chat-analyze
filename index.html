@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简易大模型调用界面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            margin-top: 20px;
+            display: none;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+            display: none;
+        }
+        .log-container {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            background-color: #f8f8f8;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        .log-request {
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .log-response {
+            color: #0066cc;
+        }
+        .log-error {
+            color: #cc0000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>简易大模型调用界面</h1>
+        
+        <label for="api-endpoint">API端点URL</label>
+        <input type="text" id="api-endpoint" placeholder="例如：https://api.openai.com/v1/chat/completions">
+        
+        <label for="api-key">API密钥</label>
+        <input type="password" id="api-key" placeholder="输入您的API密钥">
+        
+        <div style="display: flex; align-items: center; margin-bottom: 15px;">
+            <input type="checkbox" id="debug-mode" style="width: auto; margin-right: 8px;">
+            <label for="debug-mode" style="display: inline; margin: 0;">显示调试日志</label>
+        </div>
+        
+        <label for="model">模型选择</label>
+        <select id="model">
+            <option value="gpt-4">OpenAI - GPT-4</option>
+            <option value="gpt-3.5-turbo">OpenAI - GPT-3.5 Turbo</option>
+            <option value="claude-3-opus-20240229">Anthropic - Claude 3 Opus</option>
+            <option value="claude-3-sonnet-20240229">Anthropic - Claude 3 Sonnet</option>
+            <option value="claude-3-haiku-20240307">Anthropic - Claude 3 Haiku</option>
+            <option value="gemini-pro">Google - Gemini Pro</option>
+            <option value="gemini-1.5-pro">Google - Gemini 1.5 Pro</option>
+            <option value="gemini-1.5-flash">Google - Gemini 1.5 Flash</option>
+            <option value="custom">自定义</option>
+        </select>
+        
+        <div id="custom-model-container" style="display: none;">
+            <label for="custom-model">自定义模型名称</label>
+            <input type="text" id="custom-model" placeholder="输入自定义模型名称">
+        </div>
+        
+        <label for="prompt">输入内容</label>
+        <textarea id="prompt" placeholder="输入您想发送给AI的内容..."></textarea>
+        
+        <button id="submit-btn">发送请求</button>
+        
+        <div class="loading" id="loading">处理中，请稍候...</div>
+        <div class="error" id="error"></div>
+        <div class="response" id="response"></div>
+        
+        <div class="log-container" id="log-container">
+            <div class="log-title">API调用日志</div>
+            <div class="log-request" id="log-request"></div>
+            <div class="log-response" id="log-response"></div>
+            <div class="log-error" id="log-error"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const modelSelect = document.getElementById('model');
+            const customModelContainer = document.getElementById('custom-model-container');
+            
+            // 从本地存储加载调试模式设置
+            const debugMode = localStorage.getItem('debugMode') === 'true';
+            document.getElementById('debug-mode').checked = debugMode;
+            document.getElementById('log-container').style.display = debugMode ? 'block' : 'none';
+            
+            // 监听调试模式切换
+            document.getElementById('debug-mode').addEventListener('change', function() {
+                const isChecked = this.checked;
+                document.getElementById('log-container').style.display = isChecked ? 'block' : 'none';
+                localStorage.setItem('debugMode', isChecked);
+            });
+            
+            // 显示/隐藏自定义模型输入框
+            modelSelect.addEventListener('change', function() {
+                if (this.value === 'custom') {
+                    customModelContainer.style.display = 'block';
+                } else {
+                    customModelContainer.style.display = 'none';
+                }
+            });
+            
+            // 发送请求按钮点击事件
+            document.getElementById('submit-btn').addEventListener('click', async function() {
+                const apiEndpoint = document.getElementById('api-endpoint').value.trim();
+                const apiKey = document.getElementById('api-key').value.trim();
+                const modelValue = modelSelect.value;
+                const prompt = document.getElementById('prompt').value.trim();
+                const loadingElement = document.getElementById('loading');
+                const errorElement = document.getElementById('error');
+                const responseElement = document.getElementById('response');
+                
+                // 验证输入
+                if (!apiEndpoint || !apiKey || !prompt) {
+                    errorElement.textContent = '请填写所有必填字段！';
+                    errorElement.style.display = 'block';
+                    return;
+                }
+                
+                // 获取实际使用的模型名称
+                let actualModel = modelValue;
+                if (modelValue === 'custom') {
+                    actualModel = document.getElementById('custom-model').value.trim();
+                    if (!actualModel) {
+                        errorElement.textContent = '请输入自定义模型名称！';
+                        errorElement.style.display = 'block';
+                        return;
+                    }
+                }
+                
+                // 重置显示状态
+                errorElement.style.display = 'none';
+                responseElement.style.display = 'none';
+                loadingElement.style.display = 'block';
+                
+                try {
+                    // 获取日志元素
+                    const logRequestElement = document.getElementById('log-request');
+                    const logResponseElement = document.getElementById('log-response');
+                    const logErrorElement = document.getElementById('log-error');
+                    const logContainer = document.getElementById('log-container');
+                    const debugMode = document.getElementById('debug-mode').checked;
+                    
+                    // 清空之前的日志
+                    logRequestElement.innerHTML = '<b>请求信息：</b>\n';
+                    logResponseElement.innerHTML = '<b>响应信息：</b>\n';
+                    logErrorElement.innerHTML = '';
+                    logContainer.style.display = debugMode ? 'block' : 'none';
+                    
+                    // 判断API类型并设置对应的请求格式
+                    let requestBody;
+                    let headers = {
+                        'Content-Type': 'application/json'
+                    };
+                    
+                    if (apiEndpoint.includes('openai.com') || actualModel.startsWith('gpt')) {
+                        // OpenAI格式
+                        headers['Authorization'] = `Bearer ${apiKey}`;
+                        requestBody = {
+                            model: actualModel,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: prompt
+                                }
+                            ]
+                        };
+                    } else if (apiEndpoint.includes('anthropic.com') || actualModel.startsWith('claude')) {
+                        // Anthropic格式
+                        headers['x-api-key'] = apiKey;
+                        headers['anthropic-version'] = '2023-06-01';
+                        requestBody = {
+                            model: actualModel,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: prompt
+                                }
+                            ],
+                            max_tokens: 1000
+                        };
+                    } else if (apiEndpoint.includes('generativelanguage.googleapis.com') || actualModel.startsWith('gemini')) {
+                        // Google Gemini API格式
+                        headers['x-goog-api-key'] = apiKey;
+                        
+                        // Gemini API请求格式
+                        requestBody = {
+                            contents: [
+                                {
+                                    parts: [
+                                        {
+                                            text: prompt
+                                        }
+                                    ]
+                                }
+                            ],
+                            generationConfig: {
+                                temperature: 0.7,
+                                maxOutputTokens: 1000,
+                                topP: 0.95
+                            }
+                        };
+                        
+                        // 如果API端点不包含完整路径，添加必要的路径
+                        let finalApiEndpoint = apiEndpoint;
+                        if (!finalApiEndpoint.includes('/generateContent')) {
+                            if (finalApiEndpoint.endsWith('/')) {
+                                finalApiEndpoint += 'models/' + actualModel + ':generateContent';
+                            } else {
+                                finalApiEndpoint += '/models/' + actualModel + ':generateContent';
+                            }
+                        }
+                    } else {
+                        // 默认使用OpenAI格式，但允许用户自定义
+                        headers['Authorization'] = `Bearer ${apiKey}`;
+                        requestBody = {
+                            model: actualModel,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: prompt
+                                }
+                            ]
+                        };
+                    }
+                    
+                    // 记录请求信息
+                    const actualEndpoint = finalApiEndpoint || apiEndpoint;
+                    logRequestElement.innerHTML += `API端点: ${actualEndpoint}\n`;
+                    logRequestElement.innerHTML += `模型: ${actualModel}\n`;
+                    logRequestElement.innerHTML += `请求头: ${JSON.stringify(headers, null, 2).replace(/"([^"]+)":/g, '$1:')}\n`;
+                    logRequestElement.innerHTML += `请求体: ${JSON.stringify(requestBody, null, 2)}\n`;
+                    
+                    // 发送请求
+                    console.log('发送请求:', {
+                        endpoint: actualEndpoint,
+                        headers: headers,
+                        body: requestBody
+                    });
+                    
+                    const response = await fetch(actualEndpoint, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    // 记录响应状态
+                    logResponseElement.innerHTML += `状态码: ${response.status} ${response.statusText}\n`;
+                    logResponseElement.innerHTML += `响应头: ${JSON.stringify(Object.fromEntries([...response.headers]), null, 2).replace(/"([^"]+)":/g, '$1:')}\n`;
+                    
+                    const data = await response.json();
+                    
+                    // 记录响应数据
+                    logResponseElement.innerHTML += `响应数据: ${JSON.stringify(data, null, 2)}\n`;
+                    
+                    if (!response.ok) {
+                        // 详细记录错误信息
+                        let errorMessage = '请求失败';
+                        if (data.error) {
+                            errorMessage = data.error.message || data.error.toString();
+                        } else if (data.message) {
+                            errorMessage = data.message;
+                        } else if (data.error_message) {
+                            errorMessage = data.error_message;
+                        } else if (typeof data === 'string') {
+                            errorMessage = data;
+                        } else {
+                            errorMessage = JSON.stringify(data);
+                        }
+                        
+                        // 记录错误信息
+                        document.getElementById('log-error').innerHTML = `<b>错误信息：</b>\n状态码: ${response.status} ${response.statusText}\n错误消息: ${errorMessage}\n完整响应: ${JSON.stringify(data, null, 2)}\n`;
+                        
+                        throw new Error(errorMessage);
+                    }
+                    
+                    // 处理响应
+                    let result = '';
+                    if (apiEndpoint.includes('openai.com') || actualModel.startsWith('gpt')) {
+                        result = data.choices[0].message.content;
+                    } else if (apiEndpoint.includes('anthropic.com') || actualModel.startsWith('claude')) {
+                        result = data.content[0].text;
+                    } else if (apiEndpoint.includes('generativelanguage.googleapis.com') || actualModel.startsWith('gemini')) {
+                        // 处理Gemini API响应
+                        if (data.candidates && data.candidates.length > 0) {
+                            if (data.candidates[0].content && data.candidates[0].content.parts) {
+                                result = data.candidates[0].content.parts.map(part => part.text).join('\n');
+                            } else {
+                                result = JSON.stringify(data.candidates[0], null, 2);
+                            }
+                        } else {
+                            result = JSON.stringify(data, null, 2);
+                        }
+                    } else {
+                        // 尝试从通用响应中提取文本
+                        result = JSON.stringify(data, null, 2);
+                    }
+                    
+                    // 显示响应
+                    responseElement.textContent = result;
+                    responseElement.style.display = 'block';
+                } catch (error) {
+                    console.error('Error:', error);
+                    errorElement.textContent = `错误: ${error.message}`;
+                    errorElement.style.display = 'block';
+                    
+                    // 记录错误信息
+                    document.getElementById('log-error').innerHTML = `<b>错误信息：</b>\n${error.stack || error.message}\n`;
+                    
+                    // 错误时始终显示日志，无论调试模式是否开启
+                    document.getElementById('log-container').style.display = 'block';
+                    
+                    // 如果是网络错误，提供更多诊断信息
+                    if (error instanceof TypeError && error.message.includes('fetch')) {
+                        document.getElementById('log-error').innerHTML += `\n可能的原因：\n- 网络连接问题\n- CORS策略限制\n- API端点URL格式错误\n- 服务器未响应\n`;
+                    }
+                } finally {
+                    loadingElement.style.display = 'none';
+                }
+            });
+            
+            // 保存上次使用的API端点和模型（不保存API密钥）
+            const savedApiEndpoint = localStorage.getItem('apiEndpoint');
+            const savedModel = localStorage.getItem('model');
+            
+            if (savedApiEndpoint) {
+                document.getElementById('api-endpoint').value = savedApiEndpoint;
+            }
+            
+            if (savedModel) {
+                document.getElementById('model').value = savedModel;
+                if (savedModel === 'custom') {
+                    customModelContainer.style.display = 'block';
+                    const savedCustomModel = localStorage.getItem('customModel');
+                    if (savedCustomModel) {
+                        document.getElementById('custom-model').value = savedCustomModel;
+                    }
+                }
+            }
+            
+            // 保存设置
+            document.getElementById('submit-btn').addEventListener('click', function() {
+                const apiEndpoint = document.getElementById('api-endpoint').value.trim();
+                const modelValue = modelSelect.value;
+                
+                localStorage.setItem('apiEndpoint', apiEndpoint);
+                localStorage.setItem('model', modelValue);
+                
+                if (modelValue === 'custom') {
+                    const customModel = document.getElementById('custom-model').value.trim();
+                    localStorage.setItem('customModel', customModel);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
