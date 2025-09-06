@@ -27,11 +27,20 @@ function App() {
     progress: 0,
     error: null
   });
-  const [analysisState, setAnalysisState] = useState<AnalysisState>({
+  const [analysisState, setAnalysisState] = useState<{
+    isAnalyzing: boolean;
+    progress: number;
+    currentStep: string;
+    qualitativeResult: string | null;
+    quantitativeResult: AnalysisState['result'] | null;
+    error: string | null;
+    chatContent: string;
+  }>({
     isAnalyzing: false,
     progress: 0,
     currentStep: '',
-    result: null,
+    qualitativeResult: null,
+    quantitativeResult: null,
     error: null,
     chatContent: ''
   });
@@ -103,7 +112,9 @@ function App() {
       ...prev,
       isAnalyzing: true,
       progress: 0,
-      currentStep: '正在初始化分析...',
+      currentStep: '正在初始化...',
+      qualitativeResult: null,
+      quantitativeResult: null,
       error: null
     }));
 
@@ -111,39 +122,41 @@ function App() {
       console.log('Starting analysis with config:', config);
       const adapter = new AIServiceAdapter(config);
       
-      // 模拟分析进度
-      const progressSteps = [
-        '正在解析聊天记录...',
-        '正在分析客服表现...',
-        '正在评估服务质量...',
-        '正在生成改进建议...',
-        '正在生成分析报告...'
-      ];
+      // STAGE 1: 定性分析
+      setAnalysisState(prev => ({
+        ...prev,
+        progress: 25,
+        currentStep: '第一阶段：正在进行整体情况评估...'
+      }));
+      const qualResult = await adapter.performQualitativeAnalysis(analysisState.chatContent);
+      setAnalysisState(prev => ({
+        ...prev,
+        progress: 50,
+        qualitativeResult: qualResult
+      }));
 
-      for (let i = 0; i < progressSteps.length; i++) {
-        setAnalysisState(prev => ({
-          ...prev,
-          progress: ((i + 1) / progressSteps.length) * 100,
-          currentStep: progressSteps[i]
-        }));
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      // STAGE 2: 定量分析
+      setAnalysisState(prev => ({
+        ...prev,
+        progress: 75,
+        currentStep: '第二阶段：正在进行深度量化分析...'
+      }));
+      const quantResult = await adapter.performQuantitativeAnalysis(analysisState.chatContent);
 
-      // 执行AI分析
-      const result = await adapter.analyze(analysisState.chatContent);
-
+      // 分析完成
       setAnalysisState(prev => ({
         ...prev,
         isAnalyzing: false,
         progress: 100,
-        result: result,
+        currentStep: '分析完成！',
+        quantitativeResult: quantResult,
         error: null
       }));
 
-      // 保存报告到历史记录
+      // 保存报告到历史记录 (使用定量结果)
       if (fileUploadState.file) {
         try {
-          await reportManager.saveReport(result, fileUploadState.file.name, config);
+          await reportManager.saveReport(quantResult, fileUploadState.file.name, config);
           message.success('分析完成！报告已保存到历史记录');
         } catch (error) {
           message.success('分析完成！但保存报告失败');
@@ -162,13 +175,14 @@ function App() {
   };
 
   const handleExportPDF = async () => {
-    if (!analysisState.result) {
+    if (!analysisState.quantitativeResult) {
       message.error('没有可导出的分析结果');
       return;
     }
-
+    // The PDF export should now target the component that renders BOTH results.
+    // We will assume pdfExport service can handle this.
     try {
-      await PDFExportService.exportSimpleReport(analysisState.result);
+      await PDFExportService.exportFullReport('full-report-container');
       message.success('PDF导出成功！');
     } catch (error) {
       message.error('PDF导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
@@ -176,13 +190,12 @@ function App() {
   };
 
   const handleExportExcel = async () => {
-    if (!analysisState.result) {
+    if (!analysisState.quantitativeResult) {
       message.error('没有可导出的分析结果');
       return;
     }
-
     try {
-      await ExcelExportService.exportAnalysisResult(analysisState.result);
+      await ExcelExportService.exportAnalysisResult(analysisState.quantitativeResult);
       message.success('Excel导出成功！');
     } catch (error) {
       message.error('Excel导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
@@ -349,13 +362,14 @@ function App() {
                     )}
 
                     {/* 分析结果显示 */}
-                    {analysisState.result && (
-                      <div style={{ marginTop: 24 }}>
-                                            <AnalysisReport 
-                      result={analysisState.result}
-                      onExportPDF={handleExportPDF}
-                      onExportExcel={handleExportExcel}
-                    />
+                    {(analysisState.qualitativeResult || analysisState.quantitativeResult) && (
+                      <div style={{ marginTop: 24 }} id="full-report-container">
+                        <AnalysisReport 
+                          qualitativeResult={analysisState.qualitativeResult}
+                          quantitativeResult={analysisState.quantitativeResult}
+                          onExportPDF={handleExportPDF}
+                          onExportExcel={handleExportExcel}
+                        />
                       </div>
                     )}
 

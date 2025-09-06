@@ -266,7 +266,7 @@ const APIConfigPanel: React.FC<APIConfigPanelProps> = ({ onConfigChange, onConfi
         <Form.Item label="最大Token数" name="maxTokens">
           <InputNumber
             min={1000}
-            max={32000}
+            max={65536}
             style={{ width: '100%' }}
             placeholder="4000"
           />

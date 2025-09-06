@@ -29,6 +29,7 @@ import {
 import { reportManager, ReportRecord } from '../services/reportManager';
 import { AnalysisResult } from '../types';
 import AnalysisReport from './AnalysisReport';
+import PDFExportService from '../services/pdfExport'; // 修正导入路径和方式
 
 const { Search } = Input;
 const { RangePicker } = DatePicker;
@@ -409,13 +410,15 @@ const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, onRefresh }
         footer={null}
       >
         {selectedReport && (
-          <AnalysisReport 
-            result={selectedReport.result}
-            onExportPDF={() => {
-              // 这里可以添加导出PDF的逻辑
-              message.success('PDF导出功能已集成');
-            }}
-          />
+          <div id={`report-modal-${selectedReport.id}`}>
+            <AnalysisReport 
+              qualitativeResult={null} // 历史报告没有定性数据
+              quantitativeResult={selectedReport.result}
+              onExportPDF={() => {
+                PDFExportService.exportFullReport(`report-modal-${selectedReport.id}`);
+              }}
+            />
+          </div>
         )}
       </Modal>
     </div>

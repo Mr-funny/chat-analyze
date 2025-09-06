@@ -1,5 +1,6 @@
 import { APIConfig, AnalysisResult, ChatMessage, ChatSession } from '../types';
 import axios from 'axios';
+import { QUALITATIVE_PROMPT, QUANTITATIVE_PROMPT } from '../constants/promptsV2';
 
 // 模型选项接口
 export interface ModelOption {
@@ -154,29 +155,40 @@ class AIServiceAdapter {
 
   // 统一的AI调用接口
   async analyze(conversationContent: string): Promise<AnalysisResult> {
-    console.log('=== AIServiceAdapter analyze called ===');
-    console.log('Config used for analysis:', this.config);
-    console.log('Provider:', this.config.provider);
-    console.log('Model:', this.config.model);
-    
+    console.log('=== AIServiceAdapter analyze (legacy) called ===');
+    // This is now a legacy method, redirecting to the new quantitative analysis
+    return this.performQuantitativeAnalysis(conversationContent);
+  }
+
+  // STAGE 1: 定性分析
+  async performQualitativeAnalysis(conversationContent: string): Promise<string> {
+    console.log('=== Stage 1: Qualitative Analysis Started ===');
+    // For simplicity, we'll use a unified call method. 
+    // In a real scenario, you might have different logic for different providers.
+    return this.unifiedApiCall(conversationContent, QUALITATIVE_PROMPT);
+  }
+
+  // STAGE 2: 定量分析
+  async performQuantitativeAnalysis(conversationContent: string): Promise<AnalysisResult> {
+    console.log('=== Stage 2: Quantitative Analysis Started ===');
+    const jsonString = await this.unifiedApiCall(conversationContent, QUANTITATIVE_PROMPT);
+    return this.parseAnalysisResult(jsonString);
+  }
+
+  // 统一的API调用逻辑
+  private async unifiedApiCall(content: string, prompt: string): Promise<string> {
     switch (this.config.provider) {
       case 'openai':
-        return this.callOpenAI(conversationContent);
-      case 'anthropic':
-        return this.callAnthropic(conversationContent);
-      case 'azure':
-        return this.callAzureOpenAI(conversationContent);
-      case 'custom':
-        return this.callCustomAPI(conversationContent);
+        return this.callOpenAI(content, prompt);
+      // Add cases for 'anthropic', 'azure', 'custom' if they need different request structures
       default:
-        // 如果没有配置或配置无效，返回模拟数据
-        console.log('Using mock result due to invalid config');
-        return this.generateMockResult(conversationContent);
+        // Defaulting to OpenAI/Custom API structure
+        return this.callCustomAPI(content, prompt);
     }
   }
 
   // OpenAI调用
-  private async callOpenAI(content: string): Promise<AnalysisResult> {
+  private async callOpenAI(content: string, prompt: string): Promise<string> {
     try {
       const baseURL = this.config.baseURL || 'https://api.openai.com/v1';
       
@@ -187,7 +199,7 @@ class AIServiceAdapter {
           messages: [
             {
               role: 'system',
-              content: this.getAnalysisPrompt()
+              content: prompt
             },
             {
               role: 'user',
@@ -207,63 +219,61 @@ class AIServiceAdapter {
       );
 
       const result = response.data.choices[0].message.content;
-      return this.parseAnalysisResult(result);
+      return result;
     } catch (error) {
       console.error('OpenAI API调用失败:', error);
       throw new Error(`OpenAI API错误: ${this.getErrorMessage(error)}`);
     }
   }
 
-  // Anthropic调用
-  private async callAnthropic(content: string): Promise<AnalysisResult> {
-    try {
-      const baseURL = this.config.baseURL || 'https://api.anthropic.com/v1';
-      
-      const response = await axios.post(
-        `${baseURL}/messages`,
-        {
-          model: this.config.model,
-          max_tokens: this.config.maxTokens,
-          temperature: this.config.temperature,
-          messages: [
-            {
-              role: 'user',
-              content: `${this.getAnalysisPrompt()}\n\n聊天记录内容：\n${content}`
-            }
-          ]
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': this.config.apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          timeout: 60000
-        }
-      );
-
-      const result = response.data.content[0].text;
-      return this.parseAnalysisResult(result);
-    } catch (error) {
-      console.error('Anthropic API调用失败:', error);
-      throw new Error(`Anthropic API错误: ${this.getErrorMessage(error)}`);
-    }
-  }
-
-  // Azure OpenAI调用
-  private async callAzureOpenAI(content: string): Promise<AnalysisResult> {
+  // 自定义API调用 (作为默认)
+  private async callCustomAPI(content: string, prompt: string): Promise<string> {
     try {
       if (!this.config.baseURL) {
-        throw new Error('Azure OpenAI需要配置baseURL');
+        throw new Error('自定义API需要配置baseURL');
       }
 
-      const response = await axios.post(
-        `${this.config.baseURL}/openai/deployments/${this.config.model}/chat/completions?api-version=2023-05-15`,
-        {
+      let cleanBaseURL = this.config.baseURL.trim();
+      if (cleanBaseURL.endsWith('/')) {
+        cleanBaseURL = cleanBaseURL.slice(0, -1);
+      }
+
+      let endpoint = cleanBaseURL;
+      let requestBody: any;
+      let headers: any = {
+        'Content-Type': 'application/json'
+      };
+
+      // 检查是否是Gemini API并使用正确的格式
+      if (cleanBaseURL.includes('generativelanguage.googleapis.com')) {
+        // Gemini API格式
+        if (!cleanBaseURL.includes('/v1beta/models/')) {
+          endpoint = `${cleanBaseURL}/v1beta/models/${this.config.model}:generateContent`;
+        }
+        headers['x-goog-api-key'] = this.config.apiKey;
+        requestBody = {
+          contents: [{
+            parts: [{
+              text: `${prompt}\n\n聊天记录内容：\n${content}`
+            }]
+          }],
+          generationConfig: {
+            maxOutputTokens: this.config.maxTokens,
+            temperature: this.config.temperature
+          }
+        };
+      } else {
+        // 其他API格式 (OpenAI兼容)
+        if (!endpoint.endsWith('/v1/chat/completions')) {
+          endpoint = `${endpoint}/v1/chat/completions`;
+        }
+        headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+        requestBody = {
+          model: this.config.model,
           messages: [
             {
               role: 'system',
-              content: this.getAnalysisPrompt()
+              content: prompt
             },
             {
               role: 'user',
@@ -271,86 +281,32 @@ class AIServiceAdapter {
             }
           ],
           max_tokens: this.config.maxTokens,
-          temperature: this.config.temperature
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'api-key': this.config.apiKey
-          },
-          timeout: 60000
-        }
-      );
-
-      const result = response.data.choices[0].message.content;
-      return this.parseAnalysisResult(result);
-    } catch (error) {
-      console.error('Azure OpenAI API调用失败:', error);
-      throw new Error(`Azure OpenAI API错误: ${this.getErrorMessage(error)}`);
-    }
-  }
-
-  // 自定义API调用
-  private async callCustomAPI(content: string): Promise<AnalysisResult> {
-    try {
-      if (!this.config.baseURL) {
-        throw new Error('自定义API需要配置baseURL');
-      }
-
-      // 清理baseURL，移除末尾的冒号
-      let cleanBaseURL = this.config.baseURL.trim();
-      if (cleanBaseURL.endsWith(':')) {
-        cleanBaseURL = cleanBaseURL.slice(0, -1);
-      }
-
-      console.log('Calling custom API with config:', {
-        originalBaseURL: this.config.baseURL,
-        cleanBaseURL: cleanBaseURL,
-        model: this.config.model,
-        maxTokens: this.config.maxTokens,
-        temperature: this.config.temperature
-      });
-
-      // 检查内容长度，如果太长则截断
-      const prompt = this.getAnalysisPrompt();
-      const fullContent = `${prompt}\n\n聊天记录内容：\n${content}`;
-      
-      console.log('Request content length:', fullContent.length);
-      
-      // 如果内容超过100KB，截断聊天记录
-      let finalContent = fullContent;
-      if (fullContent.length > 100000) {
-        const maxChatLength = 100000 - prompt.length - 100; // 保留一些空间
-        finalContent = `${prompt}\n\n聊天记录内容：\n${content.substring(0, maxChatLength)}...\n(内容已截断，仅分析前${Math.floor(maxChatLength/1000)}KB)`;
-        console.log('Content truncated to:', finalContent.length);
-      }
-
-      const response = await axios.post(
-        cleanBaseURL,
-        {
-          model: this.config.model,
-          messages: [
-            {
-              role: 'user',
-              content: finalContent
-            }
-          ],
-          max_tokens: this.config.maxTokens,
           temperature: this.config.temperature,
           stream: false
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.config.apiKey}`
-          },
-          timeout: 120000 // 增加到2分钟
-        }
-      );
+        };
+      }
+      
+      console.log('Calling API endpoint:', endpoint);
+      console.log('Request headers:', headers);
 
-      console.log('Custom API response:', response.data);
-      const result = response.data.choices[0].message.content;
-      return this.parseAnalysisResult(result);
+      const response = await axios.post(endpoint, requestBody, {
+        headers: headers,
+        timeout: 120000 // 2分钟超时
+      });
+
+      console.log('API response:', response.data);
+      
+      // 根据API类型解析响应
+      let result: string;
+      if (cleanBaseURL.includes('generativelanguage.googleapis.com')) {
+        // Gemini API响应格式
+        result = response.data.candidates[0].content.parts[0].text;
+      } else {
+        // OpenAI兼容API响应格式
+        result = response.data.choices[0].message.content;
+      }
+      
+      return result;
     } catch (error) {
       console.error('自定义API调用失败:', error);
       throw new Error(`自定义API错误: ${this.getErrorMessage(error)}`);
@@ -389,105 +345,27 @@ class AIServiceAdapter {
     }
   }
 
-  // 获取分析提示词
-  private getAnalysisPrompt(): string {
-    return `你是1688 B端店铺业务分析师。请分析以下客服聊天记录，输出JSON格式：
-
-{
-  "report_metadata": {
-    "title": "1688业务聊天分析报告",
-    "date": "2025年08月11日",
-    "total_customers": 1,
-    "analysis_period": "单次对话"
-  },
-  "executive_summary": {
-    "overall_score": 85,
-    "key_metrics": {
-      "response_rate": 90,
-      "attitude_score": 85,
-      "sales_skills": 80,
-      "negotiation_ability": 85
-    },
-    "top_issues": ["响应速度", "产品知识", "价格谈判", "客户需求理解", "跟进服务"],
-    "trend_analysis": "客服表现良好，需要加强产品知识"
-  },
-  "customer_analysis": [
-    {
-      "customer_id": "客户ID",
-      "conversation_summary": "对话摘要",
-      "score_breakdown": {
-        "response_rate": 数字,
-        "attitude": 数字,
-        "sales_skills": 数字,
-        "negotiation": 数字,
-        "overall": 数字
-      },
-      "issues_found": [
-        {
-          "category": "A/B/C",
-          "issue": "具体问题",
-          "severity": "高/中/低",
-          "evidence": "引用原文",
-          "suggestion": "改进建议"
-        }
-      ],
-      "todos": ["待办1", "待办2"],
-      "highlights": ["亮点1", "亮点2"]
-    }
-  ],
-  "best_practices": [
-    {
-      "scenario": "场景描述",
-      "problem": "面临问题",
-      "solution": "解决方案",
-      "script": "推荐话术"
-    }
-  ],
-  "action_plan": {
-    "immediate": ["立即行动1", "立即行动2"],
-    "short_term": ["短期计划1", "短期计划2"],
-    "long_term": ["长期计划1", "长期计划2"]
-  }
-}
-
-## 分析要求
-1. 从专业性、响应效率、问题解决、沟通技巧、业务转化等维度评估
-2. 识别关键问题和改进机会
-3. 提供具体的改进建议
-4. 生成结构化的分析报告
-
-## 评分标准
-- 回复响应率 (30%): 根据首次响应和平均响应时间计算
-- 回复态度 (20%): 主要依据服务态度和语气
-- 销售技巧 (30%): 主要依据需求挖掘和成交推进
-- 谈判能力 (20%): 重点评估价值塑造和主动推进成交
-
-请确保输出的是有效的JSON格式，可以直接解析。`;
-  }
-
   // 解析分析结果
   private parseAnalysisResult(result: string): AnalysisResult {
     try {
-      // 尝试直接解析JSON
       return JSON.parse(result);
     } catch (error) {
-      // 如果直接解析失败，尝试提取JSON部分
       const jsonMatch = result.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           return JSON.parse(jsonMatch[0]);
         } catch {
           console.error('JSON解析失败，返回模拟数据');
-          return this.generateMockResult('');
+          return this.generateMockResult();
         }
       }
       console.error('无法解析AI响应，返回模拟数据');
-      return this.generateMockResult('');
+      return this.generateMockResult();
     }
   }
 
   // 生成模拟分析结果
-  private generateMockResult(content: string): AnalysisResult {
+  private generateMockResult(): AnalysisResult {
     return {
       report_metadata: {
         title: "1688业务聊天战略分析报告",
