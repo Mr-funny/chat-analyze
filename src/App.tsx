@@ -6,11 +6,10 @@ import FileUpload from './components/FileUpload';
 import AnalysisReport from './components/AnalysisReport';
 import ReportHistory from './components/ReportHistory';
 import BatchUpload from './components/BatchUpload';
-import { APIConfig, FileUploadState, AnalysisState } from './types';
+import { APIConfig, FileUploadState, AnalysisResult, FullAnalysisResult } from './types';
 import { configManager } from './services/configManager';
 import { AIServiceAdapter } from './services/aiAnalysis';
 import PDFExportService from './services/pdfExport';
-import ExcelExportService from './services/excelExport';
 import { reportManager } from './services/reportManager';
 import './App.css';
 
@@ -27,22 +26,21 @@ function App() {
     progress: 0,
     error: null
   });
+  
+  const [chatContent, setChatContent] = useState<string>('');
+
   const [analysisState, setAnalysisState] = useState<{
     isAnalyzing: boolean;
     progress: number;
     currentStep: string;
-    qualitativeResult: string | null;
-    quantitativeResult: AnalysisState['result'] | null;
+    result: FullAnalysisResult | null; 
     error: string | null;
-    chatContent: string;
   }>({
     isAnalyzing: false,
     progress: 0,
     currentStep: '',
-    qualitativeResult: null,
-    quantitativeResult: null,
+    result: null,
     error: null,
-    chatContent: ''
   });
 
   const [currentView, setCurrentView] = useState<'analysis' | 'history' | 'batch'>('analysis');
@@ -53,7 +51,6 @@ function App() {
 
   const initializeApp = async () => {
     try {
-      // 加载保存的配置
       const savedConfig = await configManager.loadConfig();
       if (savedConfig) {
         setConfig(savedConfig);
@@ -68,8 +65,6 @@ function App() {
   };
 
   const handleConfigChange = (newConfig: APIConfig | null) => {
-    console.log('=== App handleConfigChange called ===');
-    console.log('New config:', newConfig);
     setConfig(newConfig);
   };
 
@@ -78,92 +73,68 @@ function App() {
   };
 
   const handleFileUploaded = (content: string) => {
-    console.log('=== App handleFileUploaded called ===');
-    console.log('File uploaded, content length:', content.length);
-    console.log('Content preview:', content.substring(0, 200));
     message.success('文件上传成功，可以开始分析了！');
-    // 保存聊天内容用于后续分析
-    setAnalysisState(prev => {
-      console.log('Setting analysis state with chat content');
-      return {
-        ...prev,
-        chatContent: content
-      };
+    setChatContent(content);
+    setAnalysisState({
+      isAnalyzing: false,
+      progress: 0,
+      currentStep: '',
+      result: null,
+      error: null,
     });
   };
 
   const handleUploadStateChange = (state: FileUploadState) => {
-    console.log('Upload state changed:', state);
     setFileUploadState(state);
   };
-
+  
   const handleStartAnalysis = async () => {
     if (!config) {
       message.error('请先配置AI模型参数');
       return;
     }
-
-    if (!analysisState.chatContent) {
+    if (!chatContent) {
       message.error('请先上传聊天记录文件');
       return;
     }
 
-    setAnalysisState(prev => ({
-      ...prev,
+    setAnalysisState({
       isAnalyzing: true,
       progress: 0,
       currentStep: '正在初始化...',
-      qualitativeResult: null,
-      quantitativeResult: null,
+      result: null,
       error: null
-    }));
+    });
 
     try {
-      console.log('Starting analysis with config:', config);
       const adapter = new AIServiceAdapter(config);
       
-      // STAGE 1: 定性分析
-      setAnalysisState(prev => ({
-        ...prev,
-        progress: 25,
-        currentStep: '第一阶段：正在进行整体情况评估...'
-      }));
-      const qualResult = await adapter.performQualitativeAnalysis(analysisState.chatContent);
-      setAnalysisState(prev => ({
-        ...prev,
-        progress: 50,
-        qualitativeResult: qualResult
-      }));
+      const onProgress = (progress: number, currentStep: string) => {
+        setAnalysisState(prev => ({ ...prev, progress, currentStep }));
+      };
 
-      // STAGE 2: 定量分析
-      setAnalysisState(prev => ({
-        ...prev,
-        progress: 75,
-        currentStep: '第二阶段：正在进行深度量化分析...'
-      }));
-      const quantResult = await adapter.performQuantitativeAnalysis(analysisState.chatContent);
+      const fullResult = await adapter.performFullAnalysis(chatContent, onProgress);
 
-      // 分析完成
       setAnalysisState(prev => ({
         ...prev,
         isAnalyzing: false,
         progress: 100,
         currentStep: '分析完成！',
-        quantitativeResult: quantResult,
+        result: fullResult,
         error: null
       }));
+      
+      message.success('分析完成！');
 
-      // 保存报告到历史记录 (使用定量结果)
-      if (fileUploadState.file) {
+      if (fileUploadState.file && fullResult.quantitative) {
         try {
-          await reportManager.saveReport(quantResult, fileUploadState.file.name, config);
-          message.success('分析完成！报告已保存到历史记录');
+          await reportManager.saveReport(fullResult.quantitative, fileUploadState.file.name, config);
+          message.info('报告已保存到历史记录');
         } catch (error) {
-          message.success('分析完成！但保存报告失败');
+           message.warning('保存报告到历史记录失败');
         }
-      } else {
-        message.success('分析完成！');
       }
+
     } catch (error) {
       setAnalysisState(prev => ({
         ...prev,
@@ -175,39 +146,15 @@ function App() {
   };
 
   const handleExportPDF = async () => {
-    if (!analysisState.quantitativeResult) {
+    if (!analysisState.result) {
       message.error('没有可导出的分析结果');
       return;
     }
-    // The PDF export should now target the component that renders BOTH results.
-    // We will assume pdfExport service can handle this.
     try {
       await PDFExportService.exportFullReport('full-report-container');
       message.success('PDF导出成功！');
     } catch (error) {
       message.error('PDF导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  const handleExportExcel = async () => {
-    if (!analysisState.quantitativeResult) {
-      message.error('没有可导出的分析结果');
-      return;
-    }
-    try {
-      await ExcelExportService.exportAnalysisResult(analysisState.quantitativeResult);
-      message.success('Excel导出成功！');
-    } catch (error) {
-      message.error('Excel导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  const handleBatchComplete = async (results: any[]) => {
-    try {
-      await ExcelExportService.exportBatchResults(results);
-      message.success('批量分析结果导出成功！');
-    } catch (error) {
-      message.error('批量结果导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
     }
   };
 
@@ -314,18 +261,6 @@ function App() {
                       onUploadStateChange={handleUploadStateChange}
                     />
                     
-                    {/* 调试信息 */}
-                    <Card style={{ marginTop: 16, backgroundColor: '#f0f0f0' }}>
-                      <div style={{ fontSize: '12px', color: '#666' }}>
-                        <div>调试信息：</div>
-                        <div>文件状态: {fileUploadState.file ? '已上传' : '未上传'}</div>
-                        <div>上传中: {fileUploadState.isUploading ? '是' : '否'}</div>
-                        <div>错误: {fileUploadState.error || '无'}</div>
-                        <div>聊天内容长度: {analysisState.chatContent?.length || 0}</div>
-                      </div>
-                    </Card>
-
-                    {/* 开始分析按钮 */}
                     {fileUploadState.file && !fileUploadState.isUploading && !fileUploadState.error && (
                       <Card style={{ marginTop: 16 }}>
                         <div style={{ textAlign: 'center' }}>
@@ -347,8 +282,7 @@ function App() {
                         </div>
                       </Card>
                     )}
-                    
-                    {/* 分析状态显示 */}
+
                     {analysisState.isAnalyzing && (
                       <Card style={{ marginTop: 16 }}>
                         <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -361,19 +295,15 @@ function App() {
                       </Card>
                     )}
 
-                    {/* 分析结果显示 */}
-                    {(analysisState.qualitativeResult || analysisState.quantitativeResult) && (
-                      <div style={{ marginTop: 24 }} id="full-report-container">
-                        <AnalysisReport 
-                          qualitativeResult={analysisState.qualitativeResult}
-                          quantitativeResult={analysisState.quantitativeResult}
-                          onExportPDF={handleExportPDF}
-                          onExportExcel={handleExportExcel}
-                        />
-                      </div>
+                    {analysisState.result && (
+                       <div style={{ marginTop: 24 }} id="full-report-container">
+                         <AnalysisReport 
+                           result={analysisState.result}
+                           onExportPDF={handleExportPDF}
+                         />
+                       </div>
                     )}
 
-                    {/* 错误显示 */}
                     {analysisState.error && (
                       <Card style={{ marginTop: 16 }}>
                         <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -384,7 +314,7 @@ function App() {
                     )}
                   </>
                 ) : currentView === 'batch' ? (
-                  <BatchUpload onBatchComplete={handleBatchComplete} />
+                  <BatchUpload onBatchComplete={() => message.info('批量处理完成，原Excel导出功能已移除。')} />
                 ) : (
                   <ReportHistory />
                 )}

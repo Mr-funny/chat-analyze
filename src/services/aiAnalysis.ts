@@ -1,6 +1,16 @@
-import { APIConfig, AnalysisResult, ChatMessage, ChatSession } from '../types';
+import { 
+  APIConfig, 
+  AnalysisResult, 
+  ChatMessage, 
+  ChatSession,
+  SalesAnalysisResult,
+  CustomerAnalysisResult,
+  FullAnalysisResult
+} from '../types';
 import axios from 'axios';
 import { QUALITATIVE_PROMPT, QUANTITATIVE_PROMPT } from '../constants/promptsV2';
+import { SALES_PERFORMANCE_PROMPT, CUSTOMER_ANALYSIS_PROMPT } from '../constants/promptsV3';
+import { parseChatLog } from '../utils/chatParser';
 
 // 模型选项接口
 export interface ModelOption {
@@ -172,7 +182,115 @@ class AIServiceAdapter {
   async performQuantitativeAnalysis(conversationContent: string): Promise<AnalysisResult> {
     console.log('=== Stage 2: Quantitative Analysis Started ===');
     const jsonString = await this.unifiedApiCall(conversationContent, QUANTITATIVE_PROMPT);
-    return this.parseAnalysisResult(jsonString);
+    console.log('[Quantitative raw]', jsonString);
+    const cleaned = this.cleanJsonString(jsonString);
+    console.log('[Quantitative cleaned]', cleaned);
+    return this.parseAnalysisResult(cleaned);
+  }
+
+  // STAGE 3: 销售表现分析
+  async performSalesAnalysis(conversationContent: string): Promise<SalesAnalysisResult> {
+    console.log('=== Stage 3: Sales Performance Analysis Started ===');
+    const jsonString = await this.unifiedApiCall(conversationContent, SALES_PERFORMANCE_PROMPT);
+    console.log('[Sales raw]', jsonString);
+    const cleaned = this.cleanJsonString(jsonString);
+    console.log('[Sales cleaned]', cleaned);
+    try {
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Failed to parse Sales Analysis JSON:', error);
+      throw new Error('无法解析销售表现分析的结果');
+    }
+  }
+
+  // STAGE 4: 客户意图分析
+  async performCustomerAnalysis(conversationContent: string): Promise<CustomerAnalysisResult> {
+    console.log('=== Stage 4: Customer Intent Analysis Started ===');
+    const jsonString = await this.unifiedApiCall(conversationContent, CUSTOMER_ANALYSIS_PROMPT);
+    console.log('[Customer raw]', jsonString);
+    const cleaned = this.cleanJsonString(jsonString);
+    console.log('[Customer cleaned]', cleaned);
+    try {
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Failed to parse Customer Analysis JSON:', error);
+      throw new Error('无法解析客户意图分析的结果');
+    }
+  }
+  
+  // New orchestrator for the 4-step analysis
+  async performFullAnalysis(
+    chatContent: string,
+    onProgress: (progress: number, step: string) => void
+  ): Promise<FullAnalysisResult> {
+    
+    try {
+      // Step 1 & 2: Perform initial analysis on the whole content
+      onProgress(10, '第一阶段：正在进行整体情况评估...');
+      const qualitative = await this.performQualitativeAnalysis(chatContent);
+      onProgress(25, '第二阶段：正在进行深度量化分析...');
+      const quantitative = await this.performQuantitativeAnalysis(chatContent);
+
+      // Parse the chat log to prepare for step 3 and 4
+      onProgress(40, '正在解析和分组对话...');
+      const parsedLogs = parseChatLog(chatContent);
+
+      // Step 3: Analyze by salesperson
+      const salesAnalysis: Record<string, SalesAnalysisResult> = {};
+      const salesEntries = Object.entries(parsedLogs);
+      let currentProgress = 40;
+      const salesProgressIncrement = salesEntries.length > 0 ? 30 / salesEntries.length : 0;
+
+      for (const [salesPerson, customerConversations] of salesEntries) {
+        onProgress(currentProgress, `第三阶段：正在分析销售 [${salesPerson}] 的表现...`);
+        // Aggregate all conversations for this salesperson
+        let aggregatedContent = `这是销售'${salesPerson}'与多位客户的对话记录汇总：\n\n`;
+        for (const customer in customerConversations) {
+          aggregatedContent += `--- 与客户'${customer}'的对话 ---\n${customerConversations[customer].text}\n\n`;
+        }
+        const result = await this.performSalesAnalysis(aggregatedContent);
+        salesAnalysis[salesPerson] = result;
+        currentProgress += salesProgressIncrement;
+        onProgress(Math.min(currentProgress, 70), `销售 [${salesPerson}] 分析完成`);
+      }
+
+      // Step 4: Analyze by customer
+      const customerAnalysis: Record<string, CustomerAnalysisResult> = {};
+      // First, we need to regroup conversations by customer
+      const customerGroups: Record<string, string> = {};
+      for (const salesPerson in parsedLogs) {
+        for (const customerName in parsedLogs[salesPerson]) {
+          if (!customerGroups[customerName]) {
+            customerGroups[customerName] = '';
+          }
+          customerGroups[customerName] += `--- 来自销售'${salesPerson}'的对话 ---\n${parsedLogs[salesPerson][customerName].text}\n\n`;
+        }
+      }
+      
+      currentProgress = 70;
+      const customerEntries = Object.entries(customerGroups);
+      const customerProgressIncrement = customerEntries.length > 0 ? 30 / customerEntries.length : 0;
+
+      for (const [customerName, conversationText] of customerEntries) {
+        onProgress(currentProgress, `第四阶段：正在分析客户 [${customerName}] 的意图...`);
+        const result = await this.performCustomerAnalysis(conversationText);
+        customerAnalysis[customerName] = result;
+        currentProgress += customerProgressIncrement;
+        onProgress(Math.min(currentProgress, 99), `客户 [${customerName}] 分析完成`);
+      }
+
+      onProgress(100, '分析完成！');
+
+      return {
+        qualitative,
+        quantitative,
+        sales: salesAnalysis,
+        customer: customerAnalysis,
+      };
+    } catch (error) {
+      console.error('[performFullAnalysis error]', error);
+      throw error;
+    }
   }
 
   // 统一的API调用逻辑
@@ -207,7 +325,8 @@ class AIServiceAdapter {
             }
           ],
           max_tokens: this.config.maxTokens,
-          temperature: this.config.temperature
+          temperature: this.config.temperature,
+          response_format: { type: "json_object" } // 强制返回JSON格式
         },
         {
           headers: {
@@ -260,7 +379,24 @@ class AIServiceAdapter {
           generationConfig: {
             maxOutputTokens: this.config.maxTokens,
             temperature: this.config.temperature
-          }
+          },
+          // 强制返回JSON格式的参数
+          tools: [{
+            functionDeclarations: [{
+              name: "getAnalysisResult",
+              description: "获取分析结果",
+              parameters: {
+                type: "object",
+                properties: {
+                  result: {
+                    type: "string",
+                    description: "JSON格式的分析结果"
+                  }
+                },
+                required: ["result"]
+              }
+            }]
+          }]
         };
       } else {
         // 其他API格式 (OpenAI兼容)
@@ -282,7 +418,8 @@ class AIServiceAdapter {
           ],
           max_tokens: this.config.maxTokens,
           temperature: this.config.temperature,
-          stream: false
+          stream: false,
+          response_format: { type: "json_object" } // 强制返回JSON格式
         };
       }
       
@@ -300,7 +437,21 @@ class AIServiceAdapter {
       let result: string;
       if (cleanBaseURL.includes('generativelanguage.googleapis.com')) {
         // Gemini API响应格式
-        result = response.data.candidates[0].content.parts[0].text;
+        if (response.data.candidates && 
+            response.data.candidates[0].content && 
+            response.data.candidates[0].content.parts && 
+            response.data.candidates[0].content.parts[0]) {
+          // 常规响应
+          result = response.data.candidates[0].content.parts[0].text;
+        } else if (response.data.candidates && 
+                  response.data.candidates[0].content && 
+                  response.data.candidates[0].functionCall) {
+          // 函数调用响应
+          result = response.data.candidates[0].content.functionCall.args.result;
+        } else {
+          console.error('无法解析Gemini API响应:', response.data);
+          throw new Error('Gemini API响应格式不正确');
+        }
       } else {
         // OpenAI兼容API响应格式
         result = response.data.choices[0].message.content;
@@ -345,22 +496,55 @@ class AIServiceAdapter {
     }
   }
 
+  // 清理从AI返回的JSON字符串，去除可能的Markdown代码块标记
+  private cleanJsonString(jsonString: string): string {
+    console.log('原始返回字符串:', jsonString);
+    
+    // 首先尝试移除Markdown代码块标记
+    const markdownMatch = jsonString.match(/```(?:json)?([\s\S]*?)```/);
+    if (markdownMatch && markdownMatch[1]) {
+      jsonString = markdownMatch[1].trim();
+      console.log('移除Markdown后:', jsonString);
+    }
+    
+    // 然后尝试提取最外层的JSON对象
+    const jsonMatch = jsonString.match(/(\{[\s\S]*\})/);
+    if (jsonMatch && jsonMatch[1]) {
+      const cleaned = jsonMatch[1].trim();
+      console.log('提取JSON对象后:', cleaned);
+      return cleaned;
+    }
+    
+    // 尝试修复常见的JSON格式错误
+    let fixedString = jsonString
+      .replace(/(\w+)(?=:)/g, '"$1"') // 将没有引号的键名添加引号
+      .replace(/'/g, '"')             // 将单引号替换为双引号
+      .replace(/,\s*}/g, '}')         // 移除对象末尾多余的逗号
+      .replace(/,\s*]/g, ']');        // 移除数组末尾多余的逗号
+      
+    console.log('尝试修复格式后:', fixedString);
+    
+    // 如果上述都失败，返回修复后的字符串
+    return fixedString.trim();
+  }
+
   // 解析分析结果
   private parseAnalysisResult(result: string): AnalysisResult {
     try {
-      return JSON.parse(result);
+      return JSON.parse(this.cleanJsonString(result));
     } catch (error) {
+      // Fallback for older approach if direct parsing fails
       const jsonMatch = result.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           return JSON.parse(jsonMatch[0]);
         } catch {
-          console.error('JSON解析失败，返回模拟数据');
-          return this.generateMockResult();
+          console.error('JSON解析失败');
+          throw new Error('无法解析AI返回的JSON数据');
         }
       }
-      console.error('无法解析AI响应，返回模拟数据');
-      return this.generateMockResult();
+      console.error('无法解析AI响应');
+      throw new Error('AI返回的数据格式不正确');
     }
   }
 

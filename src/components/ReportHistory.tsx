@@ -27,7 +27,7 @@ import {
   ReloadOutlined
 } from '@ant-design/icons';
 import { reportManager, ReportRecord } from '../services/reportManager';
-import { AnalysisResult } from '../types';
+import { AnalysisResult, FullAnalysisResult } from '../types';
 import AnalysisReport from './AnalysisReport';
 import PDFExportService from '../services/pdfExport'; // 修正导入路径和方式
 
@@ -409,17 +409,55 @@ const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, onRefresh }
         style={{ top: 20 }}
         footer={null}
       >
-        {selectedReport && (
-          <div id={`report-modal-${selectedReport.id}`}>
-            <AnalysisReport 
-              qualitativeResult={null} // 历史报告没有定性数据
-              quantitativeResult={selectedReport.result}
-              onExportPDF={() => {
-                PDFExportService.exportFullReport(`report-modal-${selectedReport.id}`);
-              }}
-            />
-          </div>
-        )}
+        {selectedReport && (() => {
+          // 将旧的报告数据适配到新的FullAnalysisResult结构
+          const fullResultForHistory: FullAnalysisResult = {
+            qualitative: "历史报告仅包含定量分析数据，不包含此部分的详细分析。",
+            quantitative: selectedReport.result,
+            sales: {
+              "default": {
+                performance_comment: "历史报告暂无详细评价",
+                evidence: [],
+                improvement: [],
+                script_suggestion: [],
+                todos: [],
+                // 保留兼容性字段
+                evaluation_summary: {
+                  overall_comment: "无",
+                  strength: "无",
+                  improvement_area: "无"
+                },
+                detailed_scores: []
+              }
+            },
+            customer: {
+              "default": {
+                customer_profile: {
+                  core_need: "无",
+                  profile_type: "无",
+                  decision_factors: "无",
+                  satisfaction_level: "无",
+                  potential_value: "无"
+                },
+                supporting_evidence: {
+                  core_need_quote: "无",
+                  profile_type_quote: "无"
+                }
+              }
+            }
+          };
+
+          return (
+            <div id={`report-modal-${selectedReport.id}`}>
+              <AnalysisReport 
+                result={fullResultForHistory}
+                onExportPDF={() => {
+                  PDFExportService.exportFullReport(`report-modal-${selectedReport.id}`);
+                }}
+              />
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

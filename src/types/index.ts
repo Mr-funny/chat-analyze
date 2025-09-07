@@ -88,6 +88,52 @@ export interface ActionPlan {
   long_term: string[];
 }
 
+// ===============================================
+// NEW TYPES FOR 4-STEP ANALYSIS
+// ===============================================
+
+export interface SalesAnalysisResult {
+  performance_comment: string;
+  evidence: string[];
+  improvement: string[];
+  script_suggestion: string[];
+  todos: string[];
+  // 保留原字段以兼容历史数据，但UI不再使用
+  evaluation_summary?: {
+    overall_comment: string;
+    strength: string;
+    improvement_area: string;
+  };
+  detailed_scores?: {
+    dimension: string;
+    score: number;
+    evidence: string;
+  }[];
+}
+
+export interface CustomerAnalysisResult {
+  customer_profile: {
+    core_need: string;
+    profile_type: string;
+    decision_factors: string;
+    satisfaction_level: string;
+    potential_value: string;
+  };
+  supporting_evidence: {
+    core_need_quote: string;
+    profile_type_quote: string;
+  };
+}
+
+// This will hold the results of all four analysis steps
+export interface FullAnalysisResult {
+  qualitative: string;
+  quantitative: AnalysisResult;
+  sales: Record<string, SalesAnalysisResult>;
+  customer: Record<string, CustomerAnalysisResult>;
+}
+
+
 // 文件上传相关
 export interface FileUploadState {
   file: File | null;
