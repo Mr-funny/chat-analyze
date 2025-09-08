@@ -8,8 +8,10 @@ import {
   FullAnalysisResult
 } from '../types';
 import axios from 'axios';
-import { QUALITATIVE_PROMPT, QUANTITATIVE_PROMPT } from '../constants/promptsV2';
-import { SALES_PERFORMANCE_PROMPT, CUSTOMER_ANALYSIS_PROMPT } from '../constants/promptsV3';
+import { QUALITATIVE_PROMPT } from '../constants/promptsQualitative';
+import { QUANTITATIVE_PROMPT } from '../constants/promptsQuantitative';
+import { SALES_PERFORMANCE_PROMPT } from '../constants/promptsSales';
+import { CUSTOMER_ANALYSIS_PROMPT } from '../constants/promptsCustomer';
 import { parseChatLog } from '../utils/chatParser';
 
 // 模型选项接口
@@ -175,7 +177,8 @@ class AIServiceAdapter {
     console.log('=== Stage 1: Qualitative Analysis Started ===');
     // For simplicity, we'll use a unified call method. 
     // In a real scenario, you might have different logic for different providers.
-    return this.unifiedApiCall(conversationContent, QUALITATIVE_PROMPT);
+    // 定性分析需要 Markdown 文本，禁止强制 JSON
+    return this.unifiedApiCall(conversationContent, QUALITATIVE_PROMPT, false);
   }
 
   // STAGE 2: 定量分析
@@ -294,19 +297,19 @@ class AIServiceAdapter {
   }
 
   // 统一的API调用逻辑
-  private async unifiedApiCall(content: string, prompt: string): Promise<string> {
+  private async unifiedApiCall(content: string, prompt: string, expectJson: boolean = true): Promise<string> {
     switch (this.config.provider) {
       case 'openai':
-        return this.callOpenAI(content, prompt);
+        return this.callOpenAI(content, prompt, expectJson);
       // Add cases for 'anthropic', 'azure', 'custom' if they need different request structures
       default:
         // Defaulting to OpenAI/Custom API structure
-        return this.callCustomAPI(content, prompt);
+        return this.callCustomAPI(content, prompt, expectJson);
     }
   }
 
   // OpenAI调用
-  private async callOpenAI(content: string, prompt: string): Promise<string> {
+  private async callOpenAI(content: string, prompt: string, expectJson: boolean = true): Promise<string> {
     try {
       const baseURL = this.config.baseURL || 'https://api.openai.com/v1';
       
@@ -326,7 +329,7 @@ class AIServiceAdapter {
           ],
           max_tokens: this.config.maxTokens,
           temperature: this.config.temperature,
-          response_format: { type: "json_object" } // 强制返回JSON格式
+          ...(expectJson ? { response_format: { type: "json_object" } } : {})
         },
         {
           headers: {
@@ -346,7 +349,7 @@ class AIServiceAdapter {
   }
 
   // 自定义API调用 (作为默认)
-  private async callCustomAPI(content: string, prompt: string): Promise<string> {
+  private async callCustomAPI(content: string, prompt: string, expectJson: boolean = true): Promise<string> {
     try {
       if (!this.config.baseURL) {
         throw new Error('自定义API需要配置baseURL');
@@ -380,23 +383,25 @@ class AIServiceAdapter {
             maxOutputTokens: this.config.maxTokens,
             temperature: this.config.temperature
           },
-          // 强制返回JSON格式的参数
-          tools: [{
-            functionDeclarations: [{
-              name: "getAnalysisResult",
-              description: "获取分析结果",
-              parameters: {
-                type: "object",
-                properties: {
-                  result: {
-                    type: "string",
-                    description: "JSON格式的分析结果"
-                  }
-                },
-                required: ["result"]
-              }
+          ...(expectJson ? {
+            // 仅在需要JSON时启用函数声明
+            tools: [{
+              functionDeclarations: [{
+                name: "getAnalysisResult",
+                description: "获取分析结果",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    result: {
+                      type: "string",
+                      description: "JSON格式的分析结果"
+                    }
+                  },
+                  required: ["result"]
+                }
+              }]
             }]
-          }]
+          } : {})
         };
       } else {
         // 其他API格式 (OpenAI兼容)
@@ -419,7 +424,7 @@ class AIServiceAdapter {
           max_tokens: this.config.maxTokens,
           temperature: this.config.temperature,
           stream: false,
-          response_format: { type: "json_object" } // 强制返回JSON格式
+          ...(expectJson ? { response_format: { type: "json_object" } } : {})
         };
       }
       

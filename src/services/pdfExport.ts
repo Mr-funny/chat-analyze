@@ -14,38 +14,71 @@ class PDFExportService {
       // 为了更好的截图效果，临时增加背景色
       element.style.backgroundColor = 'white';
 
-      const canvas = await html2canvas(element, {
+      // 控制渲染比例，避免超大画布；2x 在清晰度与体积间较均衡
+      const scale = 2;
+      const captureOptions: any = {
         useCORS: true,
         allowTaint: true,
-        // 使用 width/height 替代不兼容的 windowWidth/windowHeight
-        width: element.scrollWidth,
+        scale,
+        width: element.clientWidth,
         height: element.scrollHeight,
-      });
+      };
+      const canvas = await html2canvas(element, captureOptions as any);
 
       element.style.backgroundColor = ''; // 恢复原始背景色
 
-      const pdf = new jsPDF('p', 'mm', 'a4');
+      // 启用压缩，单位毫米，A4 纵向
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      
-      const ratio = imgWidth / imgHeight;
-      const canvasPdfWidth = pdfWidth;
-      const canvasPdfHeight = canvasPdfWidth / ratio;
+      // 根据A4比例在画布坐标系下计算单页高度（像素）
+      // 稍微缩短每页高度，降低切到组件边框的概率
+      const pageHeightPx = Math.floor((pdfHeight / pdfWidth) * canvas.width) - 4;
+      let currentPageTopPx = 0;
+      // 为避免分页间出现细微缝隙，加入1-2px重叠
+      // 放大重叠高度，保证不同板块不被切割
+      const overlapPx = 8;
+      // 统一像素到毫米的缩放比例（按宽度等比）
+      const scalePxToMm = pdfWidth / canvas.width;
 
-      let position = 0;
-      let heightLeft = canvasPdfHeight;
+      // 使用切片方式分页，避免整张大图重复插入导致体积暴涨与截断
+      while (currentPageTopPx < canvas.height) {
+        const sliceHeight = Math.min(pageHeightPx, canvas.height - currentPageTopPx);
 
-      pdf.addImage(canvas, 'PNG', 0, position, canvasPdfWidth, canvasPdfHeight);
-      heightLeft -= pdfHeight;
+        // 创建临时canvas承载当页图像
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+        const pageCtx = pageCanvas.getContext('2d');
+        if (!pageCtx) break;
+        pageCtx.drawImage(
+          canvas,
+          0,
+          currentPageTopPx,
+          canvas.width,
+          sliceHeight,
+          0,
+          0,
+          canvas.width,
+          sliceHeight
+        );
 
-      while (heightLeft > 0) {
-        position -= pdfHeight;
-        pdf.addPage();
-        pdf.addImage(canvas, 'PNG', 0, position, canvasPdfWidth, canvasPdfHeight);
-        heightLeft -= pdfHeight;
+        // 使用JPEG并设置压缩质量，极大降低文件体积
+        const imgData = pageCanvas.toDataURL('image/jpeg', 0.82);
+
+        // 以等比缩放适配A4宽度，并做统一取整，避免浮点误差
+        const imgPdfWidth = pdfWidth;
+        const imgPdfHeightRaw = sliceHeight * scalePxToMm;
+        const imgPdfHeight = Math.round(imgPdfHeightRaw * 100) / 100; // 保留2位小数
+
+        if (currentPageTopPx > 0) {
+          pdf.addPage();
+        }
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgPdfWidth, imgPdfHeight);
+
+        // 下一页从当前切片的末端减去重叠像素开始，避免缝隙
+        currentPageTopPx += sliceHeight - overlapPx;
       }
 
       pdf.save(filename);

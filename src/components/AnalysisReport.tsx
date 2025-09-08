@@ -152,7 +152,8 @@ const AnalysisReport: React.FC<AnalysisReportProps> = ({ result, onExportPDF }) 
           >
             <Row gutter={[16, 16]}>
               <Col span={24}>
-                <Card title="总体评分" bordered={false}>
+                <Card bordered={false} headStyle={{ borderBottom: 'none', padding: 0 }} bodyStyle={{ paddingTop: 0 }}>
+                  <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>总体评分</Title>
                   <Row gutter={16} align="middle">
                     <Col span={8}>
                       <div style={{ textAlign: 'center' }}>
@@ -177,7 +178,8 @@ const AnalysisReport: React.FC<AnalysisReportProps> = ({ result, onExportPDF }) 
               </Col>
               
               <Col span={24}>
-                <Card title="关键指标" bordered={false}>
+                <Card bordered={false} headStyle={{ borderBottom: 'none', padding: 0 }} bodyStyle={{ paddingTop: 0 }}>
+                  <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>关键指标</Title>
                   <Row gutter={16}>
                     {Object.entries(quantitative.executive_summary.key_metrics).map(([key, value]) => (
                       <Col span={6} key={key}>
@@ -196,7 +198,8 @@ const AnalysisReport: React.FC<AnalysisReportProps> = ({ result, onExportPDF }) 
               </Col>
               
               <Col span={24}>
-                <Card title="趋势分析" bordered={false}>
+                <Card bordered={false} headStyle={{ borderBottom: 'none', padding: 0 }} bodyStyle={{ paddingTop: 0 }}>
+                  <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>趋势分析</Title>
                   <Paragraph>{quantitative.executive_summary.trend_analysis}</Paragraph>
                 </Card>
               </Col>
@@ -299,24 +302,28 @@ const AnalysisReport: React.FC<AnalysisReportProps> = ({ result, onExportPDF }) 
                               renderItem={item => {
                                 // 解析 "场景：xxx | 策略：xxx" 格式
                                 const parts = item.split(' | ');
+                                const wrapStyle: React.CSSProperties = { whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' };
                                 if (parts.length === 2) {
                                   const scenario = parts[0].replace('场景：', '');
                                   const strategy = parts[1].replace('策略：', '');
                                   return (
                                     <List.Item style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                                      <div style={{ marginBottom: '4px' }}>
-                                        <Tag color="red" style={{ marginBottom: '4px' }}>📍 {scenario}</Tag>
+                                      <div style={{ marginBottom: '6px', display: 'flex', gap: 8, width: '100%' }}>
+                                        <Tag color="red">📍 场景</Tag>
+                                        <span style={wrapStyle}>{scenario}</span>
                                       </div>
-                                      <div>
-                                        <Tag color="blue" style={{ marginBottom: '8px' }}>💡 {strategy}</Tag>
+                                      <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                                        <Tag color="blue">💡 策略</Tag>
+                                        <span style={wrapStyle}>{strategy}</span>
                                       </div>
                                     </List.Item>
                                   );
                                 } else {
                                   // 兼容旧格式
                                   return (
-                                    <List.Item>
-                                      <Tag color="orange" style={{ marginBottom: '8px' }}>{item}</Tag>
+                                    <List.Item style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                      <Tag color="orange" style={{ marginRight: 8, flex: '0 0 auto' }}>建议</Tag>
+                                      <span style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{item}</span>
                                     </List.Item>
                                   );
                                 }
@@ -355,10 +362,9 @@ const AnalysisReport: React.FC<AnalysisReportProps> = ({ result, onExportPDF }) 
                             <List
                               dataSource={record.todos || []}
                               renderItem={item => (
-                                <List.Item>
-                                  <Tag color="green" style={{ marginBottom: '8px' }}>
-                                    ✓ {item}
-                                  </Tag>
+                                <List.Item style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                  <Tag color="green" style={{ marginRight: 8, flex: '0 0 auto' }}>✓ 待办</Tag>
+                                  <span style={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{item}</span>
                                 </List.Item>
                               )}
                             />
