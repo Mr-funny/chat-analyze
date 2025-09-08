@@ -1,0 +1,19 @@
+{
+  "files": {
+    "main.css": "/chat-analyze/static/css/main.ac8e9fa9.css",
+    "main.js": "/chat-analyze/static/js/main.c491b3e2.js",
+    "static/js/977.8ca188c3.chunk.js": "/chat-analyze/static/js/977.8ca188c3.chunk.js",
+    "static/js/667.aae19a0b.chunk.js": "/chat-analyze/static/js/667.aae19a0b.chunk.js",
+    "static/js/453.5f17ff45.chunk.js": "/chat-analyze/static/js/453.5f17ff45.chunk.js",
+    "index.html": "/chat-analyze/index.html",
+    "main.ac8e9fa9.css.map": "/chat-analyze/static/css/main.ac8e9fa9.css.map",
+    "main.c491b3e2.js.map": "/chat-analyze/static/js/main.c491b3e2.js.map",
+    "977.8ca188c3.chunk.js.map": "/chat-analyze/static/js/977.8ca188c3.chunk.js.map",
+    "667.aae19a0b.chunk.js.map": "/chat-analyze/static/js/667.aae19a0b.chunk.js.map",
+    "453.5f17ff45.chunk.js.map": "/chat-analyze/static/js/453.5f17ff45.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.ac8e9fa9.css",
+    "static/js/main.c491b3e2.js"
+  ]
+}
